@@ -29,7 +29,7 @@ Before you begin, ensure you have met the following requirements:
 - API ID and Hash: You can get these by creating an application on [my.telegram.org](https://my.telegram.org)
 - To Get `SESSION_STRING` Open [@SmartUtilBot](https://t.me/SmartUtilBot). Bot and use /pyro command and then follow all instructions
 
-> **Note**: All dependencies including Python, `pyrofork`, `pyleaves`, `tgcrypto`, and `ffmpeg` are automatically installed when you deploy with Docker Compose.
+> **Note**: All dependencies including Python, `kurigram`, `pyleaves`, `tgcrypto`, and `ffmpeg` are automatically installed when you deploy with Docker Compose.
 
 ## Configuration
 
@@ -37,7 +37,7 @@ Before you begin, ensure you have met the following requirements:
 2. Replace the placeholders for `API_ID`, `API_HASH`, `SESSION_STRING`, and `BOT_TOKEN` with your actual values:
    - **`API_ID`**: Your API ID from [my.telegram.org](https://my.telegram.org).
    - **`API_HASH`**: Your API Hash from [my.telegram.org](https://my.telegram.org).
-   - **`SESSION_STRING`**: The session string generated using [@SmartUtilBot](https://t.me/SmartUtilBot).
+   - **`SESSION_STRING`**: The session string generated using [@TgDevToolBot](https://t.me/TgDevToolBot).
    - **`BOT_TOKEN`**: The token you obtained from [@BotFather](https://t.me/BotFather).
 
 3. Optional performance settings (add to `config.py`):
