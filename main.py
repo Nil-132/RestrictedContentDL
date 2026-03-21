@@ -19,6 +19,8 @@ from helpers.utils import (
     send_media
 )
 
+from helpers.forward import check_forward_permission, resolve_forward_chat_id
+
 from helpers.files import (
     get_download_path,
     fileSizeLimit,
@@ -31,7 +33,7 @@ from helpers.files import (
 from helpers.msg import (
     getChatMsgID,
     get_file_name,
-    get_parsed_msg
+    get_raw_text
 )
 
 from config import PyroConf
@@ -60,6 +62,7 @@ user = Client(
 
 RUNNING_TASKS = set()
 download_semaphore = None
+forward_chat_id = None
 
 def track_task(coro):
     task = asyncio.create_task(coro)
@@ -135,11 +138,23 @@ async def cleanup_storage(_, message: Message):
 
 
 async def handle_download(bot: Client, message: Message, post_url: str):
+    global forward_chat_id
     async with download_semaphore:
         if "?" in post_url:
             post_url = post_url.split("?", 1)[0]
 
         try:
+            effective_forward_chat_id = None
+            if forward_chat_id:
+                ok, err_msg = await check_forward_permission(bot, forward_chat_id)
+                if not ok:
+                    await message.reply(
+                        f"⚠️ **Forward chat misconfigured:** {err_msg}\n\n"
+                        "The file will be sent to you only."
+                    )
+                else:
+                    effective_forward_chat_id = forward_chat_id
+
             chat_id, message_id = getChatMsgID(post_url)
             chat_message = await user.get_messages(chat_id=chat_id, message_ids=message_id)
 
@@ -159,21 +174,32 @@ async def handle_download(bot: Client, message: Message, post_url: str):
                 ):
                     return
 
-            parsed_caption = await get_parsed_msg(
-                chat_message.caption or "", chat_message.caption_entities
+            raw_caption, raw_caption_entities = get_raw_text(
+                chat_message.caption, chat_message.caption_entities
             )
-            parsed_text = await get_parsed_msg(
-                chat_message.text or "", chat_message.entities
+            raw_text, raw_text_entities = get_raw_text(
+                chat_message.text, chat_message.entities
             )
 
             if chat_message.media_group_id:
-                if not await processMediaGroup(chat_message, bot, message):
+                if not await processMediaGroup(chat_message, bot, message, forward_chat_id=effective_forward_chat_id):
                     await message.reply(
                         "**Could not extract any valid media from the media group.**"
                     )
                 return
 
-            elif chat_message.media:
+            has_downloadable_media = (
+                chat_message.photo
+                or chat_message.video
+                or chat_message.audio
+                or chat_message.document
+                or chat_message.voice
+                or chat_message.video_note
+                or chat_message.animation
+                or chat_message.sticker
+            )
+
+            if has_downloadable_media:
                 start_time = time()
                 progress_message = await message.reply("**📥 Downloading Progress...**")
 
@@ -225,16 +251,41 @@ async def handle_download(bot: Client, message: Message, post_url: str):
                     message,
                     media_path,
                     media_type,
-                    parsed_caption,
+                    raw_caption,
+                    raw_caption_entities,
                     progress_message,
                     start_time,
+                    forward_chat_id=effective_forward_chat_id,
                 )
 
                 cleanup_download(media_path)
                 await progress_message.delete()
 
+            elif chat_message.poll:
+                await message.reply("**This post contains a poll which cannot be downloaded.**")
+
             elif chat_message.text or chat_message.caption:
-                await message.reply(parsed_text or parsed_caption)
+                txt = raw_text or raw_caption
+                ents = raw_text_entities if raw_text else raw_caption_entities
+                sent_text = None
+                try:
+                    sent_text = await message.reply(txt, entities=ents or None)
+                except BadRequest as e:
+                    if "ENTITY_TEXT_INVALID" in str(e):
+                        LOGGER(__name__).warning(f"ENTITY_TEXT_INVALID in text reply, retrying without entities: {e}")
+                        sent_text = await message.reply(txt)
+                    else:
+                        raise
+                if effective_forward_chat_id and sent_text:
+                    try:
+                        await bot.copy_message(
+                            chat_id=effective_forward_chat_id,
+                            from_chat_id=sent_text.chat.id,
+                            message_id=sent_text.id,
+                        )
+                        LOGGER(__name__).info(f"Copied text message to chat: {effective_forward_chat_id}")
+                    except Exception as e:
+                        LOGGER(__name__).error(f"Failed to copy text message to {effective_forward_chat_id}: {e}")
             else:
                 await message.reply("**No media or text found in the post URL.**")
 
@@ -244,12 +295,27 @@ async def handle_download(bot: Client, message: Message, post_url: str):
             if wait_s > 0:
                 await asyncio.sleep(wait_s + 1)
             return
-        except (PeerIdInvalid, BadRequest, KeyError):
-            await message.reply("**Make sure the user client is part of the chat.**")
+        except PeerIdInvalid as e:
+            LOGGER(__name__).error(f"PeerIdInvalid for {post_url}: {e}")
+            await message.reply(
+                "**❌ Access Denied**\n\n"
+                "The user client cannot access this chat.\n"
+                "Make sure the user account has joined the channel/group.\n\n"
+                f"**Details:** `{e}`"
+            )
+        except BadRequest as e:
+            LOGGER(__name__).error(f"BadRequest for {post_url}: {e}")
+            await message.reply(
+                "**❌ Bad Request**\n\n"
+                f"Telegram returned an error: `{e}`\n\n"
+                "This may happen if the message ID is invalid or the chat is inaccessible."
+            )
+        except KeyError as e:
+            LOGGER(__name__).error(f"KeyError for {post_url}: {e}")
+            await message.reply(f"**❌ Invalid URL format:** `{e}`")
         except Exception as e:
-            error_message = f"**❌ {str(e)}**"
-            await message.reply(error_message)
-            LOGGER(__name__).error(e)
+            LOGGER(__name__).error(f"Unexpected error for {post_url}: {e}")
+            await message.reply(f"**❌ Unexpected error:** `{e}`")
 
 
 @bot.on_message(filters.command("dl") & filters.private)
@@ -416,8 +482,12 @@ async def cancel_all_tasks(_, message: Message):
 
 
 async def initialize():
-    global download_semaphore
+    global download_semaphore, forward_chat_id
     download_semaphore = asyncio.Semaphore(PyroConf.MAX_CONCURRENT_DOWNLOADS)
+
+    if PyroConf.FORWARD_CHAT_ID:
+        forward_chat_id = await resolve_forward_chat_id(PyroConf.FORWARD_CHAT_ID)
+        LOGGER(__name__).info(f"Auto-forward enabled. Target chat: {forward_chat_id}")
 
 if __name__ == "__main__":
     try:
