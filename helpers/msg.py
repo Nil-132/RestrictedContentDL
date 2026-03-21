@@ -1,12 +1,11 @@
 # Copyright (C) @TheSmartBisnu
 # Channel: https://t.me/itsSmartDev
 
-from pyrogram.parser import Parser
 from pyrogram.utils import get_channel_id
 
 
-async def get_parsed_msg(text, entities):
-    return Parser.unparse(text, entities or [], is_html=False)
+def get_raw_text(text, entities):
+    return (text or ""), (entities or [])
     
 
 def getChatMsgID(link: str):
