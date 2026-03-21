@@ -19,6 +19,7 @@
 - ✅ Supports downloading from both single media posts and media groups.
 - 🔄 Progress bar showing real-time downloading progress.
 - ✍️ Copy text messages or captions from Telegram posts.
+- 📤 Auto-forward of downloaded media/text to a defined channel or group.
 
 ## Requirements
 
@@ -39,6 +40,7 @@ Before you begin, ensure you have met the following requirements:
    - **`API_HASH`**: Your API Hash from [my.telegram.org](https://my.telegram.org).
    - **`SESSION_STRING`**: The session string generated using [@TgDevToolBot](https://t.me/TgDevToolBot).
    - **`BOT_TOKEN`**: The token you obtained from [@BotFather](https://t.me/BotFather).
+   - **`FORWARD_CHAT_ID`**: Optional. Set a target channel/group chat ID (example: `-1001234567890`) to automatically copy downloaded content there. Leave empty to disable.
 
 3. Optional performance settings (add to `config.py`):
    - **`MAX_CONCURRENT_DOWNLOADS`**: Number of simultaneous downloads (default: 3)
